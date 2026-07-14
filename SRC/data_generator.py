@@ -20,8 +20,8 @@ def generate_data() -> None:
     np.random.seed(42)
     random.seed(42)
     
-    start_date = pd.to_datetime('2022-01-01')
-    end_date = pd.to_datetime('2024-12-31')
+    start_date = pd.to_datetime('2023-01-01')
+    end_date = pd.to_datetime('2025-12-31')
     
     dec_counter = itertools.count(10000)
     data = []
@@ -86,7 +86,7 @@ def generate_data() -> None:
             
             # Apply anomalies
             current_price_foreign = base_price_foreign
-            if anomaly_type == 'severe' and (date.year == 2024 and date.month >= 7):
+            if anomaly_type == 'severe' and (date.year == 2025 and date.month >= 7):
                 current_price_foreign = base_price_foreign * np.random.uniform(0.3, 0.5)
             elif anomaly_type == 'moderate':
                 if np.random.rand() < 0.2:
@@ -100,12 +100,12 @@ def generate_data() -> None:
             invoice_amount_foreign = round(unit_price_foreign * qty, 2)
             
             # Exchange rate deterministic based on year to eliminate uncorrelated statistical noise
-            if date.year == 2022:
-                ex_rate = 34.81
-            elif date.year == 2023:
+            if date.year == 2023:
                 ex_rate = 35.07
-            else:
+            elif date.year == 2024:
                 ex_rate = 31.98
+            else:
+                ex_rate = 32.88
             
             unit_price_thb = round(unit_price_foreign * ex_rate, 2)
             invoice_amount_thb = round(invoice_amount_foreign * ex_rate, 2)
@@ -134,7 +134,7 @@ def generate_data() -> None:
                 'Product_Code': f"PROD-{random.randint(100, 999)}",
                 'Brand': 'BrandX',
                 'Model_No': f"M-{random.randint(10, 99)}",
-                'Product_Year': str(random.randint(2020, 2024)),
+                'Product_Year': str(random.randint(2021, 2025)),
                 'Cleaned_Description': desc,
                 'Quantity': qty,
                 'Net_Weight_KG': net_weight,

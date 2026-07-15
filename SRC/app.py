@@ -5,12 +5,15 @@ import plotly.express as px
 import plotly.graph_objects as go
 import json
 import html
+from filelock import FileLock
+import math
 
 from praise_engine import (
     load_and_validate_csv, 
     prepare_and_filter_data, 
     calculate_statistical_bounds, 
     evaluate_transaction_risk,
+    train_praise_anomaly_model,
     BUSINESS_FLOOR_MULTIPLIER,
     EXTERNAL_BENCHMARK_MULTIPLIER
 )
@@ -48,10 +51,23 @@ def load_historical_data(path_str: str, mtime: float) -> tuple[pd.DataFrame, dic
 
 df_historical, filter_metrics = load_historical_data(str(csv_path), current_mtime)
 
+@st.cache_resource
+def get_ml_engine(mtime: float):
+    _ = mtime
+    try:
+        model, preprocessor = train_praise_anomaly_model()
+        return model, preprocessor
+    except Exception as e:
+        st.error(f"ML Engine Initialization Error: {e}")
+        return None, None
+
+feedback_lake_path = project_root / 'mockup_feedback_lake.csv'
+feedback_mtime = feedback_lake_path.stat().st_mtime if feedback_lake_path.exists() else 0.0
+ml_model, ml_preprocessor = get_ml_engine(feedback_mtime)
 # --- 2. State Management ---
 # Anti-Pollution Rule: Store historical data as a Read-Only baseline
 # Update baseline automatically if the CSV file was regenerated (mtime changed) and is valid, or if initializing
-if 'historical_df' not in st.session_state or (st.session_state.csv_mtime != current_mtime and not df_historical.empty):
+if 'historical_df' not in st.session_state or (st.session_state.get('csv_mtime', 0.0) != current_mtime and not df_historical.empty):
     st.session_state.historical_df = df_historical
     st.session_state.csv_mtime = current_mtime
 
@@ -171,13 +187,30 @@ with st.container(border=True):
     else:
         st.markdown(f"<span style='color:orange'>{stats_result.get('message', 'Insufficient data for this profile.')}</span>", unsafe_allow_html=True)
 
+    # Determine defaults for Origin and Transport to use in AI evaluation without requiring user input
+    group_df_full = df_hist[(df_hist['Importer_ID'] == importer_id) & (df_hist['Cleaned_Description'] == cleaned_description)]
+    default_origin = group_df_full['Origin_Country'].mode().iloc[0] if not group_df_full['Origin_Country'].mode().empty else 'Unknown'
+    default_transport = group_df_full['Transport_Mode'].mode().iloc[0] if not group_df_full['Transport_Mode'].mode().empty else 'Unknown'
+    
     user_price = st.number_input("CIF Unit Price (THB)", min_value=0.01, value=None, step=1.0)
 
     if st.button("💻 กดเพื่อประเมินความเสี่ยง (Run PRAISE Risk Assessment)", use_container_width=True):
         if user_price is None:
             st.error("⚠️ กรุณาระบุราคาสินค้า (CIF Unit Price) ก่อนทำการประเมิน")
         elif stats_result['status'] == 'SUCCESS':
-            risk_eval = evaluate_transaction_risk(user_price, stats_result)
+            user_input_row = {
+                'Unit_Price_THB_CIF': user_price,
+                'Origin_Country': default_origin,
+                'Transport_Mode': default_transport
+            }
+            
+            risk_eval = evaluate_transaction_risk(
+                user_price, 
+                stats_result,
+                ml_model=ml_model,
+                ml_preprocessor=ml_preprocessor,
+                user_input_row=user_input_row
+            )
             
             alert_ref = None
             if risk_eval['is_anomaly']:
@@ -215,11 +248,20 @@ if alert_info and alert_info.get('profile_tuple') == selected_tuple and alert_in
         action_desc_html = "<strong>รหัสสั่งการตรวจ : 88</strong> (กลุ่มผันผวน (Volatile Group) ตรวจสอบโครงสร้างต้นทุน (Cost Breakdown))"
     elif action_code == '89':
         action_desc_html = "<strong>รหัสสั่งการตรวจ : 89</strong> (กลุ่มเสถียร (Stable Group) ตรวจสอบเอกสารใบแจ้งหนี้ (Invoice) และหลักฐานการโอนเงิน)"
+    elif action_code == '890':
+        action_desc_html = "<strong>รหัสสั่งการตรวจ : 890</strong> (Cold Start — ข้อมูลประวัตินำเข้าน้อยกว่าเกณฑ์ขั้นต่ำ บังคับตรวจสอบโดยเจ้าหน้าที่ (Human-in-the-loop))"
+    elif action_code == '891':
+        action_desc_html = "<strong>รหัสสั่งการตรวจ : 891</strong> (AI Flagged - ตรวจสอบพิกัดศุลกากร (HS Code) และพฤติกรรมความเสี่ยงแฝง)"
     else:
         safe_action_code = html.escape(action_code) if action_code else "N/A"
         action_desc_html = f"<strong>Action Code:</strong> {safe_action_code}"
 
-tab1, tab2 = st.tabs(["Executive Dashboard", "Officer Risk Terminal"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "Executive Dashboard", 
+    "Officer Risk Terminal", 
+    "AI Feedback Console", 
+    "Data Lake & ML Observability"
+])
 
 with tab1:
     st.header("Executive Dashboard (Visual Evidence)")
@@ -231,7 +273,7 @@ with tab1:
         st.markdown(f"#### :red[{action_desc_md}]")
         
     # Metrics Panel
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         shipment_count = len(df_hist[(df_hist['Importer_ID'] == importer_id) & (df_hist['Cleaned_Description'] == cleaned_description)])
         st.metric("Total Processed Shipment", f"{shipment_count:,}")
@@ -240,6 +282,12 @@ with tab1:
             st.metric("Last User Input Price", f"{alert_info.get('price', 0):,.2f} THB")
         else:
             st.metric("Last User Input Price", "-")
+    with col3:
+        if alert_info and alert_info.get('profile_tuple') == selected_tuple:
+            ai_score = alert_info.get('eval', {}).get('ai_score')
+            st.metric("AI Anomaly Score", "-" if ai_score is None else f"{ai_score:.1f}%")
+        else:
+            st.metric("AI Anomaly Score", "-")
 
     # Time-Series Plot
     group_df = df_hist[(df_hist['Importer_ID'] == importer_id) & (df_hist['Cleaned_Description'] == cleaned_description)].copy()
@@ -364,7 +412,17 @@ with tab2:
         item_no = "1"
         eval_res = alert_info.get('eval', {})
         
-        if eval_res.get('is_anomaly'):
+        if eval_res.get('action_code') == '891':
+            st.markdown(f"""
+            <div style="background-color:#fff3cd;color:black;padding:20px;border-radius:10px;border: 2px solid #ffeeba;">
+                <h3 style="color:#856404;margin-top:0;">⚠️ {eval_res['status_label']} (Latent Risk / Behavioral Anomaly)</h3>
+                <p><strong>Alert Ref No:</strong> {alert_info['ref_no']}</p>
+                <p><strong>Target:</strong> Declaration Number: {decl_no} / Item Number: {item_no}</p>
+                <p>{action_desc_html}</p>
+                <h4 style="color:#856404;">Instruction: สินค้าราคาผ่านเกณฑ์สถิติ แต่ AI พบพฤติกรรมเสี่ยงด้านประเทศต้นทาง/รูปแบบการขนส่ง ขอเอกสารเพิ่มเติมเพื่อพิจารณาอย่างละเอียด</h4>
+            </div>
+            """, unsafe_allow_html=True)
+        elif eval_res.get('is_anomaly'):
             st.markdown(f"""
             <div style="background-color:#ffe6e6;color:black;padding:20px;border-radius:10px;border: 2px solid red;">
                 <h3 style="color:red;margin-top:0;">🛑 {eval_res['status_label']} (Price Volatility / Under-valuation detected)</h3>
@@ -384,3 +442,148 @@ with tab2:
             """, unsafe_allow_html=True)
     else:
         st.info("💡 Waiting for User Input... Please click the '💻 Run PRAISE Risk Assessment' button to see results.")
+
+with tab3:
+    st.header("AI Feedback Console (Human-in-the-loop)")
+    st.markdown("เจ้าหน้าที่กรอกผลการตรวจสอบกลับเข้าระบบ เพื่อให้ AI เรียนรู้เพิ่มเติม (Feedback Loop)")
+    
+    with st.form("feedback_form"):
+        ref_input = st.text_input("PRAISE Alert Ref No.", placeholder="e.g., 690101001", key="fb_ref")
+        result_choice = st.selectbox("ผลการตรวจสอบ (Result)", ["Confirmed Fraud (พบการกระทำผิดจริง)", "False Alarm (ประเมินผิดพลาด/ปกติ)"], key="fb_result")
+        tax_recovered = st.number_input("จำนวนภาษีที่เก็บเพิ่มได้ (Reassessment Duty - THB)", min_value=0.0, value=None, step=100.0, key="fb_tax")
+        
+        submitted = st.form_submit_button("Submit Feedback to Data Lake")
+        
+        if submitted:
+            if ref_input:
+                try:
+                    if feedback_lake_path.exists():
+                        lock_path = str(feedback_lake_path) + ".lock"
+                        with FileLock(lock_path, timeout=10):
+                            fb_df = pd.read_csv(str(feedback_lake_path))
+                            is_fraud = "Confirmed Fraud" in result_choice
+                            
+                            alert = st.session_state.get('current_alert')
+                            if not alert or str(alert.get('ref_no')) != str(ref_input):
+                                st.error(f"ไม่พบข้อมูลต้นฉบับสำหรับ Ref No: {ref_input} ระบบขอปฏิเสธการบันทึกเพื่อป้องกันข้อมูล Training Set ผิดเพี้ยน")
+                            else:
+                                price = alert.get('price') or 0.0
+                                eval_data = alert.get('eval') or {}
+                                user_input = eval_data.get('user_input_row') or {}
+                                origin = user_input.get('Origin_Country') or "Unknown"
+                                transport = user_input.get('Transport_Mode') or "Unknown"
+    
+                                new_row = {
+                                    "PRAISE_Alert_Ref_No": ref_input,
+                                    "Is_Anomaly_Confirmed": is_fraud,
+                                    "Recovered_Tax_THB": tax_recovered if tax_recovered is not None else 0.0,
+                                    "Review_Timestamp": pd.Timestamp.now(),
+                                    "Review_Officer_ID": "OFFICER-UX",
+                                    "Unit_Price_THB_CIF": price,
+                                    "Origin_Country": origin,
+                                    "Transport_Mode": transport
+                                }
+                                
+                                fb_df = pd.concat([fb_df, pd.DataFrame([new_row])], ignore_index=True)
+                                temp_path = feedback_lake_path.with_name(f"{feedback_lake_path.name}.tmp")
+                                fb_df.to_csv(str(temp_path), index=False)
+                                temp_path.replace(feedback_lake_path)
+                                st.success(f"บันทึกผลการตรวจสอบสำหรับ Ref No: {ref_input} สำเร็จแล้ว ข้อมูลถูกจัดเก็บเข้า Data Lake เรียบร้อย")
+                    else:
+                        st.error("ไม่พบ Data Lake File")
+                except Exception as e:
+                    st.error(f"Error saving feedback: {e}")
+            else:
+                st.error("กรุณาระบุ PRAISE Alert Ref No.")
+                
+    st.write("") # Add spacing
+    if st.button("🧹 Clear Screen", key="clear_tab3"):
+        for key in ["fb_ref", "fb_result", "fb_tax"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
+
+with tab4:
+    st.header("Data Lake & ML Observability")
+    
+    # 1. Gauge Chart Section (Top)
+    st.subheader("Model Precision (Simulated)")
+    
+    # Center the gauge on large screens, stack normally on mobile
+    col_l, col_c, col_r = st.columns([1, 2, 1])
+    with col_c:
+        # Simulated gauge
+        fig_gauge = go.Figure(go.Indicator(
+            mode = "gauge+number",
+            value = 85.0,
+            domain = {'x': [0, 1], 'y': [0, 1]},
+            title = {'text': "AI Precision (Simulated)"},
+            gauge = {
+                'axis': {'range': [0, 100]},
+                'bar': {'color': "darkblue"},
+                'steps': [
+                    {'range': [0, 50], 'color': "lightgray"},
+                    {'range': [50, 75], 'color': "gray"}
+                ],
+            }
+        ))
+        fig_gauge.update_layout(height=280, margin=dict(t=50, b=10, l=20, r=20))
+        st.plotly_chart(fig_gauge, use_container_width=True)
+        
+    st.divider()
+    
+    # 2. Data Lake Table Section (Bottom)
+    st.subheader("Data Lake Explorer")
+    if feedback_lake_path.exists():
+        fb_df = pd.read_csv(str(feedback_lake_path))
+        
+        rows_per_page = 10
+        total_rows = len(fb_df)
+        total_pages = math.ceil(total_rows / rows_per_page) if total_rows > 0 else 1
+        
+        if 'lake_page_input' not in st.session_state:
+            st.session_state.lake_page_input = 1
+            
+        def go_first():
+            st.session_state.lake_page_input = 1
+            
+        def go_prev():
+            st.session_state.lake_page_input -= 1
+            
+        def go_next():
+            st.session_state.lake_page_input += 1
+            
+        def go_last():
+            st.session_state.lake_page_input = total_pages
+            
+        col_first, col_prev, col_page, col_next, col_last, col_export = st.columns([1, 1, 2, 1, 1, 2])
+        with col_first:
+            st.button("⏮️ หน้าแรก", disabled=(st.session_state.lake_page_input <= 1), on_click=go_first, use_container_width=True)
+        with col_prev:
+            st.button("⬅️ ก่อนหน้า", disabled=(st.session_state.lake_page_input <= 1), on_click=go_prev, use_container_width=True)
+        with col_page:
+            st.number_input(f"หน้า (1 - {total_pages})", min_value=1, max_value=total_pages, key="lake_page_input", label_visibility="collapsed")
+        with col_next:
+            st.button("ถัดไป ➡️", disabled=(st.session_state.lake_page_input >= total_pages), on_click=go_next, use_container_width=True)
+        with col_last:
+            st.button("หน้าสุดท้าย ⏭️", disabled=(st.session_state.lake_page_input >= total_pages), on_click=go_last, use_container_width=True)
+        with col_export:
+            csv = fb_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Export CSV",
+                data=csv,
+                file_name='feedback_lake_export.csv',
+                mime='text/csv',
+                use_container_width=True
+            )
+
+        start_idx = (st.session_state.lake_page_input - 1) * rows_per_page
+        end_idx = start_idx + rows_per_page
+        
+        display_df = fb_df.iloc[start_idx:end_idx].copy()
+        display_df.index = display_df.index + 1
+        
+        st.write(f"แสดงข้อมูลแถวที่ {start_idx + 1} ถึง {min(end_idx, total_rows)} จากทั้งหมด {total_rows} แถว (หน้า {st.session_state.lake_page_input}/{total_pages})")
+        st.dataframe(display_df, use_container_width=True)
+    else:
+        st.info("Feedback Lake is empty.")

@@ -26,10 +26,17 @@ def generate_data() -> None:
     dec_counter = itertools.count(10000)
     data = []
     
-    def create_profile_rows(importer_id, desc, hs_code, min_price_foreign, max_price_foreign, n_rows, anomaly_type, duty_rate_fixed, distribution_type='uniform', external_benchmark_price_thb=0.0):
+    def create_profile_rows(importer_id, desc, hs_code, min_price_foreign, max_price_foreign, n_rows, anomaly_type, duty_rate_fixed, distribution_type='uniform', external_benchmark_price_thb=0.0, origin_weights=None, transport_weights=None):
         """Helper function to create structured rows for a specific profile. Base pricing is sampled per-row from a uniform distribution range."""
         if anomaly_type not in ['severe', 'moderate', 'stable']:
             raise ValueError(f"Zero-Silent Bug Policy: Invalid anomaly_type '{anomaly_type}'. Must be 'severe', 'moderate', or 'stable'.")
+        
+        # BUG-5 Fix: Use profile-specific weighted distributions for Origin/Transport
+        # to give Isolation Forest real behavioral signals instead of uniform noise
+        if origin_weights is None:
+            origin_weights = {'JP': 1, 'US': 1, 'CN': 1, 'DE': 1}
+        if transport_weights is None:
+            transport_weights = {'Sea': 1, 'Air': 1, 'Land': 1}
             
         profile_data = []
         dates = generate_random_dates(start_date, end_date, n_rows)
@@ -122,8 +129,8 @@ def generate_data() -> None:
                 'Import_Date': date.normalize(),
                 'Importer_ID': importer_id,
                 'Broker_ID': f"BROK-{random.randint(1, 50):03d}",
-                'Transport_Mode': random.choice(['Sea', 'Air', 'Land']),
-                'Origin_Country': random.choice(['JP', 'US', 'CN', 'DE']),
+                'Transport_Mode': random.choices(list(transport_weights.keys()), weights=list(transport_weights.values()), k=1)[0],
+                'Origin_Country': random.choices(list(origin_weights.keys()), weights=list(origin_weights.values()), k=1)[0],
                 'Port_of_Entry': random.choice(['BKK', 'LCP', 'SUV']),
                 'Clearance_Port': random.choice(['BKK', 'LCP', 'SUV']),
                 'Invoice_No': f"INV-{random.randint(10000, 99999)}",
@@ -160,17 +167,28 @@ def generate_data() -> None:
     # - IMP-002 (Whisky) and IMP-007 (Passenger Cars) have artificially elevated External Benchmark Prices 
     #   (80,000 and 2,500,000 THB respectively) to ensure their 40% External Bound overrides the 50% Median Floor.
     #   This is explicitly designed for the Executive UI Demonstration.
+    # BUG-5 Fix: Each profile now has distinct Origin_Country and Transport_Mode probability
+    # distributions reflecting real-world import patterns. This creates genuine behavioral
+    # signals for the Isolation Forest AI instead of uniform random noise.
     profiles = [
-        ('IMP-001', 'Cake', '19059030', 100.0, 200.0, 10000, 'stable', 0.30, 'normal', 5000.0),
-        ('IMP-002', 'Whisky', '22083090', 500.0, 3000.0, 5500, 'moderate', 0.60, 'lognormal', 80000.0),
-        ('IMP-003', 'Perfumes', '33030000', 3000.0, 3200.0, 20000, 'moderate', 0.30, 'tight_normal', 105400.0),
+        ('IMP-001', 'Cake', '19059030', 100.0, 200.0, 10000, 'stable', 0.30, 'normal', 5000.0,
+         {'JP': 0.70, 'CN': 0.20, 'US': 0.05, 'DE': 0.05}, {'Sea': 0.60, 'Air': 0.30, 'Land': 0.10}),
+        ('IMP-002', 'Whisky', '22083090', 500.0, 3000.0, 5500, 'moderate', 0.60, 'lognormal', 80000.0,
+         {'US': 0.40, 'JP': 0.40, 'DE': 0.15, 'CN': 0.05}, {'Sea': 0.50, 'Air': 0.40, 'Land': 0.10}),
+        ('IMP-003', 'Perfumes', '33030000', 3000.0, 3200.0, 20000, 'moderate', 0.30, 'tight_normal', 105400.0,
+         {'DE': 0.50, 'US': 0.30, 'JP': 0.15, 'CN': 0.05}, {'Air': 0.60, 'Sea': 0.30, 'Land': 0.10}),
         # Note: IMP-004 is intentionally set to exactly 18 rows (< MIN_SAMPLE_SIZE of 20) 
         # to strictly test the Action Code 890 (Force Alert / Cold Start) functionality. Do not increase this number.
-        ('IMP-004', 'Leather Belts', '42033000', 1000.0, 2000.0, 18, 'severe', 0.30, 'left_skewed', 50000.0),
-        ('IMP-005', 'Women Dresses', '62044290', 1200.0, 1400.0, 25000, 'stable', 0.30, 'step_down', 44200.0),
-        ('IMP-006', 'Footwear', '64039990', 800.0, 850.0, 22000, 'stable', 0.30, 'normal', 28050.0),
-        ('IMP-007', 'Passenger Cars', '87032324', 30000.0, 80000.0, 2482, 'moderate', 0.80, 'tight_normal', 2500000.0),
-        ('IMP-008', 'Clutches', '87089360', 2000.0, 5000.0, 15000, 'stable', 0.30, 'normal', 100000.0),
+        ('IMP-004', 'Leather Belts', '42033000', 1000.0, 2000.0, 18, 'severe', 0.30, 'left_skewed', 50000.0,
+         {'CN': 0.60, 'JP': 0.20, 'DE': 0.15, 'US': 0.05}, {'Sea': 0.50, 'Air': 0.30, 'Land': 0.20}),
+        ('IMP-005', 'Women Dresses', '62044290', 1200.0, 1400.0, 25000, 'stable', 0.30, 'step_down', 44200.0,
+         {'CN': 0.80, 'JP': 0.10, 'DE': 0.05, 'US': 0.05}, {'Sea': 0.70, 'Air': 0.20, 'Land': 0.10}),
+        ('IMP-006', 'Footwear', '64039990', 800.0, 850.0, 22000, 'stable', 0.30, 'normal', 28050.0,
+         {'CN': 0.75, 'JP': 0.10, 'DE': 0.10, 'US': 0.05}, {'Sea': 0.70, 'Air': 0.20, 'Land': 0.10}),
+        ('IMP-007', 'Passenger Cars', '87032324', 30000.0, 80000.0, 2482, 'moderate', 0.80, 'tight_normal', 2500000.0,
+         {'JP': 0.50, 'DE': 0.40, 'US': 0.08, 'CN': 0.02}, {'Sea': 0.90, 'Land': 0.08, 'Air': 0.02}),
+        ('IMP-008', 'Clutches', '87089360', 2000.0, 5000.0, 15000, 'stable', 0.30, 'normal', 100000.0,
+         {'CN': 0.50, 'JP': 0.30, 'DE': 0.15, 'US': 0.05}, {'Sea': 0.65, 'Air': 0.25, 'Land': 0.10}),
     ]
     expected_total = 100000
     calculated_total = sum(p[5] for p in profiles)
@@ -203,5 +221,46 @@ def generate_data() -> None:
     
     print(f"Phase 6 Complete: Generated exactly {len(df)} rows of targeted customs data at: {output_path.name}")
 
+def generate_feedback_lake() -> None:
+    """Generate mock feedback data for ML training."""
+    project_root = Path(__file__).parent.parent
+    input_path = project_root / 'mockup_customs_data.csv'
+    output_path = project_root / 'mockup_feedback_lake.csv'
+    
+    if not input_path.exists():
+        print("Error: mockup_customs_data.csv not found. Please generate data first.")
+        return
+        
+    df = pd.read_csv(str(input_path))
+    
+    # Sample exactly 1000 rows
+    df_sample = df.sample(n=1000, random_state=99).copy()
+    
+    # Append new columns
+    # Is_Anomaly_Confirmed: Boolean, 20% True
+    np.random.seed(99)
+    df_sample['Is_Anomaly_Confirmed'] = np.random.choice([True, False], size=len(df_sample), p=[0.2, 0.8])
+    refs = np.random.choice(range(10000, 99999), size=len(df_sample), replace=False)
+    df_sample['PRAISE_Alert_Ref_No'] = [f"REF-{r}" for r in refs]
+    
+    # Recovered_Tax_THB: Float (if anomaly confirmed, else 0)
+    # BUG-2 Fix: Pre-generate random multipliers vectorized for deterministic reproducibility.
+    # Using np.random inside lambda/apply depends on Pandas iteration order which may change across versions.
+    recovery_multipliers = np.random.uniform(0.1, 0.5, size=len(df_sample))
+    df_sample['Recovered_Tax_THB'] = np.where(
+        df_sample['Is_Anomaly_Confirmed'],
+        (df_sample['Invoice_Amount_THB'] * recovery_multipliers).round(2),
+        0.0
+    )
+    
+    df_sample['Review_Officer_ID'] = [f"OFFICER-{np.random.randint(10, 50):02d}" for _ in range(len(df_sample))]
+    # Review_Timestamp within the last 30 days (deterministic anchor)
+    now = pd.Timestamp('2025-01-01')
+    df_sample['Review_Timestamp'] = [now - pd.Timedelta(days=np.random.randint(1, 30)) for _ in range(len(df_sample))]
+    
+    df_sample.to_csv(str(output_path), index=False)
+    print(f"Generated Feedback Lake ({len(df_sample)} rows) at: {output_path.name}")
+
 if __name__ == "__main__":
     generate_data()
+    generate_feedback_lake()

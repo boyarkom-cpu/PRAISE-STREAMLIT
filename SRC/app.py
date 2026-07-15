@@ -197,7 +197,7 @@ with st.container(border=True):
     if st.button("💻 กดเพื่อประเมินความเสี่ยง (Run PRAISE Risk Assessment)", use_container_width=True):
         if user_price is None:
             st.error("⚠️ กรุณาระบุราคาสินค้า (CIF Unit Price) ก่อนทำการประเมิน")
-        elif stats_result['status'] == 'SUCCESS':
+        elif stats_result['status'] in ('SUCCESS', 'INSUFFICIENT_DATA'):
             user_input_row = {
                 'Unit_Price_THB_CIF': user_price,
                 'Origin_Country': default_origin,
@@ -220,7 +220,7 @@ with st.container(border=True):
                 'profile_tuple': selected_tuple,
                 'price': user_price,
                 'stats': stats_result,
-                'eval': risk_eval,
+                'eval': {**risk_eval, 'user_input_row': user_input_row},
                 'ref_no': alert_ref,
                 'timestamp': datetime.datetime.now()
             }

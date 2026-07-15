@@ -253,7 +253,10 @@ def generate_feedback_lake() -> None:
         0.0
     )
     
-    df_sample['Review_Officer_ID'] = [f"OFFICER-{np.random.randint(10, 50):02d}" for _ in range(len(df_sample))]
+    # BUG-3 Fix: Pre-generate officer IDs vectorized for deterministic reproducibility.
+    # Consistent with BUG-2 fix pattern — avoid np.random inside list comprehension.
+    officer_ids = np.random.randint(10, 50, size=len(df_sample))
+    df_sample['Review_Officer_ID'] = [f"OFFICER-{oid:02d}" for oid in officer_ids]
     # Review_Timestamp within the last 30 days (deterministic anchor)
     now = pd.Timestamp('2025-01-01')
     df_sample['Review_Timestamp'] = [now - pd.Timedelta(days=np.random.randint(1, 30)) for _ in range(len(df_sample))]

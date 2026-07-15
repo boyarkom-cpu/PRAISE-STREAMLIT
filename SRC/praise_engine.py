@@ -4,7 +4,7 @@ import logging
 from typing import TypedDict, Optional, Tuple, Any
 from pathlib import Path
 from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 
 # --- Configuration Constants ---
@@ -57,15 +57,19 @@ def train_praise_anomaly_model() -> Tuple[Optional[IsolationForest], Optional[Co
     df = pd.read_csv(str(feedback_lake_path))
     
     # Feature Selection
-    features = ['Unit_Price_THB_CIF', 'Origin_Country', 'Transport_Mode']
+    features = ['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG', 'Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry']
     X = df[features].copy()
     
     # Preprocessing Pipeline
-    categorical_features = ['Origin_Country', 'Transport_Mode']
+    numeric_features = ['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG']
+    numeric_transformer = StandardScaler()
+    
+    categorical_features = ['Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry']
     categorical_transformer = OneHotEncoder(handle_unknown='ignore')
     
     preprocessor = ColumnTransformer(
         transformers=[
+            ('num', numeric_transformer, numeric_features),
             ('cat', categorical_transformer, categorical_features)
         ],
         remainder='passthrough'
@@ -397,8 +401,8 @@ def evaluate_transaction_risk(
     if ml_model is not None and ml_preprocessor is not None and user_input_row is not None:
         try:
             row_df = pd.DataFrame([user_input_row])
-            if all(col in row_df.columns for col in ['Unit_Price_THB_CIF', 'Origin_Country', 'Transport_Mode']):
-                X_input = ml_preprocessor.transform(row_df[['Unit_Price_THB_CIF', 'Origin_Country', 'Transport_Mode']])
+            if all(col in row_df.columns for col in ['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG', 'Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry']):
+                X_input = ml_preprocessor.transform(row_df[['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG', 'Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry']])
                 score = ml_model.decision_function(X_input)[0]
                 # Map decision function to 0-100%. score typically in [-0.5, 0.5]
                 # lower score -> higher anomaly risk
@@ -422,7 +426,7 @@ def evaluate_transaction_risk(
             return {
                 'is_anomaly': True,
                 'status_label': 'YELLOW RISK (AI FLAGGED)',
-                'action_code': '891',
+                'action_code': '90',
                 'reason': f"Price ({user_input_price:,.2f}) passed {bound_name}, but AI detected behavioral anomalies (Score: {ai_score_percent:.1f}%). Recommend HS Code review.",
                 'ai_score': ai_score_percent
             }

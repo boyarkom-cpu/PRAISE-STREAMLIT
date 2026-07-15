@@ -191,6 +191,13 @@ with st.container(border=True):
     group_df_full = df_hist[(df_hist['Importer_ID'] == importer_id) & (df_hist['Cleaned_Description'] == cleaned_description)]
     default_origin = group_df_full['Origin_Country'].mode().iloc[0] if not group_df_full['Origin_Country'].mode().empty else 'Unknown'
     default_transport = group_df_full['Transport_Mode'].mode().iloc[0] if not group_df_full['Transport_Mode'].mode().empty else 'Unknown'
+    default_broker = group_df_full['Broker_ID'].mode().iloc[0] if not group_df_full['Broker_ID'].mode().empty else 'Unknown'
+    default_brand = group_df_full['Brand'].mode().iloc[0] if not group_df_full['Brand'].mode().empty else 'Unknown'
+    default_year = group_df_full['Product_Year'].mode().iloc[0] if not group_df_full['Product_Year'].mode().empty else 'Unknown'
+    default_port = group_df_full['Port_of_Entry'].mode().iloc[0] if not group_df_full['Port_of_Entry'].mode().empty else 'Unknown'
+    
+    default_quantity = float(group_df_full['Quantity'].median()) if not group_df_full['Quantity'].isna().all() else 1.0
+    default_weight = float(group_df_full['Gross_Weight_KG'].median()) if not group_df_full['Gross_Weight_KG'].isna().all() else 1.0
     
     user_price = st.number_input("CIF Unit Price (THB)", min_value=0.01, value=None, step=1.0)
 
@@ -201,7 +208,13 @@ with st.container(border=True):
             user_input_row = {
                 'Unit_Price_THB_CIF': user_price,
                 'Origin_Country': default_origin,
-                'Transport_Mode': default_transport
+                'Transport_Mode': default_transport,
+                'Broker_ID': default_broker,
+                'Brand': default_brand,
+                'Product_Year': default_year,
+                'Port_of_Entry': default_port,
+                'Quantity': default_quantity,
+                'Gross_Weight_KG': default_weight
             }
             
             risk_eval = evaluate_transaction_risk(
@@ -250,8 +263,8 @@ if alert_info and alert_info.get('profile_tuple') == selected_tuple and alert_in
         action_desc_html = "<strong>รหัสสั่งการตรวจ : 89</strong> (กลุ่มเสถียร (Stable Group) ตรวจสอบเอกสารใบแจ้งหนี้ (Invoice) และหลักฐานการโอนเงิน)"
     elif action_code == '890':
         action_desc_html = "<strong>รหัสสั่งการตรวจ : 890</strong> (Cold Start — ข้อมูลประวัตินำเข้าน้อยกว่าเกณฑ์ขั้นต่ำ บังคับตรวจสอบโดยเจ้าหน้าที่ (Human-in-the-loop))"
-    elif action_code == '891':
-        action_desc_html = "<strong>รหัสสั่งการตรวจ : 891</strong> (AI Flagged - ตรวจสอบพิกัดศุลกากร (HS Code) และพฤติกรรมความเสี่ยงแฝง)"
+    elif action_code == '90':
+        action_desc_html = "<strong>รหัสสั่งการตรวจ : 90</strong> (AI Flagged - ตรวจสอบพิกัดศุลกากร (HS Code) และพฤติกรรมความเสี่ยงแฝง)"
     else:
         safe_action_code = html.escape(action_code) if action_code else "N/A"
         action_desc_html = f"<strong>Action Code:</strong> {safe_action_code}"
@@ -412,7 +425,7 @@ with tab2:
         item_no = "1"
         eval_res = alert_info.get('eval', {})
         
-        if eval_res.get('action_code') == '891':
+        if eval_res.get('action_code') == '90':
             st.markdown(f"""
             <div style="background-color:#fff3cd;color:black;padding:20px;border-radius:10px;border: 2px solid #ffeeba;">
                 <h3 style="color:#856404;margin-top:0;">⚠️ {eval_res['status_label']} (Latent Risk / Behavioral Anomaly)</h3>
@@ -470,8 +483,14 @@ with tab3:
                                 price = alert.get('price') or 0.0
                                 eval_data = alert.get('eval') or {}
                                 user_input = eval_data.get('user_input_row') or {}
-                                origin = user_input.get('Origin_Country') or "Unknown"
-                                transport = user_input.get('Transport_Mode') or "Unknown"
+                                origin = user_input.get('Origin_Country', 'Unknown')
+                                transport = user_input.get('Transport_Mode', 'Unknown')
+                                broker = user_input.get('Broker_ID', 'Unknown')
+                                brand = user_input.get('Brand', 'Unknown')
+                                year = user_input.get('Product_Year', 'Unknown')
+                                port = user_input.get('Port_of_Entry', 'Unknown')
+                                quantity = user_input.get('Quantity', 1.0)
+                                weight = user_input.get('Gross_Weight_KG', 1.0)
     
                                 new_row = {
                                     "PRAISE_Alert_Ref_No": ref_input,
@@ -481,7 +500,13 @@ with tab3:
                                     "Review_Officer_ID": "OFFICER-UX",
                                     "Unit_Price_THB_CIF": price,
                                     "Origin_Country": origin,
-                                    "Transport_Mode": transport
+                                    "Transport_Mode": transport,
+                                    "Broker_ID": broker,
+                                    "Brand": brand,
+                                    "Product_Year": year,
+                                    "Port_of_Entry": port,
+                                    "Quantity": quantity,
+                                    "Gross_Weight_KG": weight
                                 }
                                 
                                 fb_df = pd.concat([fb_df, pd.DataFrame([new_row])], ignore_index=True)

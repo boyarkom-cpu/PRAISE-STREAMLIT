@@ -81,6 +81,9 @@ if 'current_alert' not in st.session_state:
 if 'user_inputs' not in st.session_state:
     st.session_state.user_inputs = []  # Store UI inputs for plotting without polluting historical baseline
 
+if 'clear_counter' not in st.session_state:
+    st.session_state.clear_counter = 0
+
 # --- Schema Migration (Clear Incompatible State on Hot-Reload) ---
 SCHEMA_VERSION = 1
 if st.session_state.get('schema_version', 0) < SCHEMA_VERSION:
@@ -460,10 +463,11 @@ with tab3:
     st.header("AI Feedback Console (Human-in-the-loop)")
     st.markdown("เจ้าหน้าที่กรอกผลการตรวจสอบกลับเข้าระบบ เพื่อให้ AI เรียนรู้เพิ่มเติม (Feedback Loop)")
     
-    with st.form("feedback_form"):
-        ref_input = st.text_input("PRAISE Alert Ref No.", placeholder="e.g., 690101001", key="fb_ref")
-        result_choice = st.selectbox("ผลการตรวจสอบ (Result)", ["Confirmed Fraud (พบการกระทำผิดจริง)", "False Alarm (ประเมินผิดพลาด/ปกติ)"], key="fb_result")
-        tax_recovered = st.number_input("จำนวนภาษีที่เก็บเพิ่มได้ (Reassessment Duty - THB)", min_value=0.0, value=None, step=100.0, key="fb_tax")
+    k = st.session_state.clear_counter
+    with st.form(f"feedback_form_{k}"):
+        ref_input = st.text_input("PRAISE Alert Ref No.", placeholder="e.g., 690101001", key=f"fb_ref_{k}")
+        result_choice = st.selectbox("ผลการตรวจสอบ (Result)", ["Confirmed Fraud (พบการกระทำผิดจริง)", "False Alarm (ประเมินผิดพลาด/ปกติ)"], key=f"fb_result_{k}")
+        tax_recovered = st.number_input("จำนวนภาษีที่เก็บเพิ่มได้ (Reassessment Duty - THB)", min_value=0.0, value=None, step=100.0, key=f"fb_tax_{k}")
         
         submitted = st.form_submit_button("Submit Feedback to Data Lake")
         
@@ -523,9 +527,7 @@ with tab3:
                 
     st.write("") # Add spacing
     if st.button("🧹 Clear Screen", key="clear_tab3"):
-        for key in ["fb_ref", "fb_result", "fb_tax"]:
-            if key in st.session_state:
-                del st.session_state[key]
+        st.session_state.clear_counter += 1
         st.rerun()
 
 with tab4:

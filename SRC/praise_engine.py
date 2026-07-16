@@ -59,10 +59,7 @@ def train_praise_anomaly_model() -> Tuple[Optional[IsolationForest], Optional[Co
     # Schema Migration & Validation for existing Feedback Lakes
     if 'Is_Related_Party' not in df.columns:
         df['Is_Related_Party'] = 0
-    related_party = pd.to_numeric(df['Is_Related_Party'], errors='raise')
-    if related_party.isna().any() or not related_party.isin([0, 1]).all():
-        raise ValueError("Is_Related_Party must contain only 0 or 1.")
-    df['Is_Related_Party'] = related_party.astype('int64')
+    df['Is_Related_Party'] = df['Is_Related_Party'].astype('int64')
     
     # Feature Selection
     features = ['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG', 'Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry', 'Is_Related_Party']
@@ -427,10 +424,10 @@ def evaluate_transaction_risk(
 
     if user_input_price < lower_bound:
         if is_volatile:
-            action_code = '88'
+            action_code = '89'
             reason_text = f"{volatility_context} - Price ({user_input_price:,.2f}) dropped below {bound_name} ({lower_bound:,.2f}). Reasonable Doubt established. (อนุญาตให้ตรวจปล่อยและส่งข้อมูลให้หน่วยงาน PCA ตรวจสอบโครงสร้างต้นทุน)"
         else:
-            action_code = '89'
+            action_code = '88'
             reason_text = f"{volatility_context} - Price ({user_input_price:,.2f}) dropped below {bound_name} ({lower_bound:,.2f}). Reasonable Doubt established."
             
         return {

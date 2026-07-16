@@ -263,9 +263,9 @@ if alert_info and alert_info.get('profile_tuple') == selected_tuple and alert_in
     eval_res = alert_info.get('eval', {})
     action_code = str(eval_res.get('action_code', ''))
     if action_code == '88':
-        action_desc_html = "<strong>รหัสสั่งการตรวจ : 88</strong> (กลุ่มผันผวน (Volatile Group) อนุญาตให้ตรวจปล่อยและส่งข้อมูลให้ PCA ตรวจสอบโครงสร้างต้นทุน)"
+        action_desc_html = "<strong>รหัสสั่งการตรวจ : 88</strong> (กลุ่มเสถียร (Stable Group) ตรวจสอบเอกสารใบแจ้งหนี้ (Invoice) และหลักฐานการโอนเงิน)"
     elif action_code == '89':
-        action_desc_html = "<strong>รหัสสั่งการตรวจ : 89</strong> (กลุ่มเสถียร (Stable Group) ตรวจสอบเอกสารใบแจ้งหนี้ (Invoice) และหลักฐานการโอนเงิน)"
+        action_desc_html = "<strong>รหัสสั่งการตรวจ : 89</strong> (กลุ่มผันผวน (Volatile Group) อนุญาตให้ตรวจปล่อยและส่งข้อมูลให้ PCA ตรวจสอบโครงสร้างต้นทุน)"
     elif action_code == '890':
         action_desc_html = "ข้อมูลประวัตินำเข้าน้อยกว่าเกณฑ์ขั้นต่ำ เจ้าหน้าที่ต้องตรวจสอบด้วยตนเอง (Human-in-the-loop)"
     elif action_code == '90':
@@ -454,7 +454,7 @@ with tab2:
             """, unsafe_allow_html=True)
         elif eval_res.get('is_anomaly'):
             instruction_text = f"ขอเอกสารเพิ่มเติมเพื่อตรวจสอบราคาศุลกากรของสินค้ารายการที่ {item_no}"
-            if str(eval_res.get('action_code', '')) == '88':
+            if str(eval_res.get('action_code', '')) == '89':
                 instruction_text = "อนุญาตให้ตรวจปล่อยสินค้า และส่งข้อมูลให้หน่วยงาน PCA"
                 
             ref_no_html = f"<p><strong>Alert Ref No:</strong> {alert_info['ref_no']}</p>" if alert_info.get('ref_no') else ""

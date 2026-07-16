@@ -56,23 +56,32 @@ def train_praise_anomaly_model() -> Tuple[Optional[IsolationForest], Optional[Co
         
     df = pd.read_csv(str(feedback_lake_path))
     
+    # Schema Migration & Validation for existing Feedback Lakes
+    if 'Is_Related_Party' not in df.columns:
+        df['Is_Related_Party'] = 0
+    related_party = pd.to_numeric(df['Is_Related_Party'], errors='raise')
+    if related_party.isna().any() or not related_party.isin([0, 1]).all():
+        raise ValueError("Is_Related_Party must contain only 0 or 1.")
+    df['Is_Related_Party'] = related_party.astype('int64')
+    
     # Feature Selection
-    features = ['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG', 'Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry']
+    features = ['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG', 'Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry', 'Is_Related_Party']
     X = df[features].copy()
     
     # Preprocessing Pipeline
     numeric_features = ['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG']
     numeric_transformer = StandardScaler()
     
-    categorical_features = ['Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry']
-    categorical_transformer = OneHotEncoder(handle_unknown='ignore')
+    categorical_features = ['Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry', 'Is_Related_Party']
+    categorical_transformer = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
     
     preprocessor = ColumnTransformer(
         transformers=[
             ('num', numeric_transformer, numeric_features),
             ('cat', categorical_transformer, categorical_features)
         ],
-        remainder='passthrough'
+        remainder='passthrough',
+        sparse_threshold=0
     )
     
     # Calculate empirical contamination from Feedback Lake
@@ -128,7 +137,8 @@ def load_and_validate_csv(file_path: str) -> pd.DataFrame:
         'Duty_Paid_THB': 'float64',
         'VAT_Paid_THB': 'float64',
         'Other_Taxes_THB': 'float64',
-        'External_Benchmark_Price_THB': 'float64'
+        'External_Benchmark_Price_THB': 'float64',
+        'Is_Related_Party': 'int64'
     }
 
     try:
@@ -146,6 +156,9 @@ def load_and_validate_csv(file_path: str) -> pd.DataFrame:
 
     except Exception as e:
          raise ValueError(f"Failed to load and validate CSV against PRAISE schema: {e}") from e
+         
+    if not df['Is_Related_Party'].isin([0, 1]).all():
+        raise ValueError("Is_Related_Party must contain only 0 or 1.")
     
     return df
 
@@ -401,8 +414,8 @@ def evaluate_transaction_risk(
     if ml_model is not None and ml_preprocessor is not None and user_input_row is not None:
         try:
             row_df = pd.DataFrame([user_input_row])
-            if all(col in row_df.columns for col in ['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG', 'Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry']):
-                X_input = ml_preprocessor.transform(row_df[['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG', 'Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry']])
+            if all(col in row_df.columns for col in ['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG', 'Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry', 'Is_Related_Party']):
+                X_input = ml_preprocessor.transform(row_df[['Unit_Price_THB_CIF', 'Quantity', 'Gross_Weight_KG', 'Origin_Country', 'Transport_Mode', 'Broker_ID', 'Brand', 'Product_Year', 'Port_of_Entry', 'Is_Related_Party']])
                 score = ml_model.decision_function(X_input)[0]
                 # Map decision function to 0-100%. score typically in [-0.5, 0.5]
                 # lower score -> higher anomaly risk
@@ -413,12 +426,18 @@ def evaluate_transaction_risk(
             logging.warning(f"AI scoring failed, falling back to 0.0: {e}")
 
     if user_input_price < lower_bound:
-        action_code = '88' if is_volatile else '89'
+        if is_volatile:
+            action_code = '88'
+            reason_text = f"{volatility_context} - Price ({user_input_price:,.2f}) dropped below {bound_name} ({lower_bound:,.2f}). Reasonable Doubt established. (อนุญาตให้ตรวจปล่อยและส่งข้อมูลให้หน่วยงาน PCA ตรวจสอบโครงสร้างต้นทุน)"
+        else:
+            action_code = '89'
+            reason_text = f"{volatility_context} - Price ({user_input_price:,.2f}) dropped below {bound_name} ({lower_bound:,.2f}). Reasonable Doubt established."
+            
         return {
             'is_anomaly': True,
             'status_label': 'HIGH RISK',
             'action_code': action_code,
-            'reason': f"{volatility_context} - Price ({user_input_price:,.2f}) dropped below {bound_name} ({lower_bound:,.2f}). Reasonable Doubt established.",
+            'reason': reason_text,
             'ai_score': ai_score_percent
         }
     else:
@@ -427,7 +446,7 @@ def evaluate_transaction_risk(
                 'is_anomaly': True,
                 'status_label': 'YELLOW RISK (AI FLAGGED)',
                 'action_code': '90',
-                'reason': f"Price ({user_input_price:,.2f}) passed {bound_name}, but AI detected behavioral anomalies (Score: {ai_score_percent:.1f}%). Recommend HS Code review.",
+                'reason': f"Price ({user_input_price:,.2f}) passed {bound_name}, but AI detected behavioral anomalies (Score: {ai_score_percent:.1f}%). Recommend HS Code review. (อนุญาตให้ตรวจปล่อยและส่งข้อมูลให้หน่วยงาน PCA เพื่อประเมินพฤติกรรมความเสี่ยงแฝงพหุมิติ)",
                 'ai_score': ai_score_percent
             }
         else:

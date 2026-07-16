@@ -201,6 +201,7 @@ with st.container(border=True):
     
     default_quantity = float(group_df_full['Quantity'].median()) if not group_df_full['Quantity'].isna().all() else 1.0
     default_weight = float(group_df_full['Gross_Weight_KG'].median()) if not group_df_full['Gross_Weight_KG'].isna().all() else 1.0
+    default_related_party = int(group_df_full['Is_Related_Party'].mode().iloc[0]) if not group_df_full['Is_Related_Party'].mode().empty else 0
     
     user_price = st.number_input("CIF Unit Price (THB)", min_value=0.01, value=None, step=1.0)
 
@@ -217,7 +218,8 @@ with st.container(border=True):
                 'Product_Year': default_year,
                 'Port_of_Entry': default_port,
                 'Quantity': default_quantity,
-                'Gross_Weight_KG': default_weight
+                'Gross_Weight_KG': default_weight,
+                'Is_Related_Party': default_related_party
             }
             
             risk_eval = evaluate_transaction_risk(
@@ -229,7 +231,7 @@ with st.container(border=True):
             )
             
             alert_ref = None
-            if risk_eval['is_anomaly']:
+            if risk_eval['is_anomaly'] and str(risk_eval.get('action_code', '')) != '890':
                 alert_ref = generate_alert_ref()
                 
             st.session_state.current_alert = {
@@ -261,13 +263,13 @@ if alert_info and alert_info.get('profile_tuple') == selected_tuple and alert_in
     eval_res = alert_info.get('eval', {})
     action_code = str(eval_res.get('action_code', ''))
     if action_code == '88':
-        action_desc_html = "<strong>รหัสสั่งการตรวจ : 88</strong> (กลุ่มผันผวน (Volatile Group) ตรวจสอบโครงสร้างต้นทุน (Cost Breakdown))"
+        action_desc_html = "<strong>รหัสสั่งการตรวจ : 88</strong> (กลุ่มผันผวน (Volatile Group) อนุญาตให้ตรวจปล่อยและส่งข้อมูลให้ PCA ตรวจสอบโครงสร้างต้นทุน)"
     elif action_code == '89':
         action_desc_html = "<strong>รหัสสั่งการตรวจ : 89</strong> (กลุ่มเสถียร (Stable Group) ตรวจสอบเอกสารใบแจ้งหนี้ (Invoice) และหลักฐานการโอนเงิน)"
     elif action_code == '890':
-        action_desc_html = "<strong>รหัสสั่งการตรวจ : 890</strong> (Cold Start — ข้อมูลประวัตินำเข้าน้อยกว่าเกณฑ์ขั้นต่ำ บังคับตรวจสอบโดยเจ้าหน้าที่ (Human-in-the-loop))"
+        action_desc_html = "ข้อมูลประวัตินำเข้าน้อยกว่าเกณฑ์ขั้นต่ำ เจ้าหน้าที่ต้องตรวจสอบด้วยตนเอง (Human-in-the-loop)"
     elif action_code == '90':
-        action_desc_html = "<strong>รหัสสั่งการตรวจ : 90</strong> (AI Flagged - ตรวจสอบพิกัดศุลกากร (HS Code) และพฤติกรรมความเสี่ยงแฝง)"
+        action_desc_html = "<strong>รหัสสั่งการตรวจ : 90</strong> (AI Flagged - อนุญาตให้ตรวจปล่อยและส่งข้อมูลให้ PCA ประเมินพฤติกรรมความเสี่ยงแฝง)"
     else:
         safe_action_code = html.escape(action_code) if action_code else "N/A"
         action_desc_html = f"<strong>Action Code:</strong> {safe_action_code}"
@@ -285,8 +287,11 @@ with tab1:
     # Alert Cross-Reference
     if action_desc_html:
         action_desc_md = action_desc_html.replace("<strong>", "**").replace("</strong>", "**")
-        st.markdown(f"### ⚠️ :red[PRAISE Alert Ref No: {alert_info['ref_no']}]")
-        st.markdown(f"#### :red[{action_desc_md}]")
+        if alert_info.get('ref_no'):
+            st.markdown(f"### ⚠️ :red[PRAISE Alert Ref No: {alert_info['ref_no']}]")
+            st.markdown(f"#### :red[{action_desc_md}]")
+        else:
+            st.markdown(f"#### ⚠️ :orange[{action_desc_md}]")
         
     # Metrics Panel
     col1, col2, col3 = st.columns(3)
@@ -421,31 +426,46 @@ with tab2:
     
     # Alert Cross-Reference
     if alert_info and alert_info.get('profile_tuple') == selected_tuple and alert_info.get('eval', {}).get('is_anomaly'):
-        st.markdown(f"### ⚠️ <span style='color:red'>PRAISE Alert Ref No: {alert_info['ref_no']}</span>", unsafe_allow_html=True)
+        if alert_info.get('ref_no'):
+            st.markdown(f"### ⚠️ <span style='color:red'>PRAISE Alert Ref No: {alert_info['ref_no']}</span>", unsafe_allow_html=True)
         
     if alert_info and alert_info.get('profile_tuple') == selected_tuple:
         decl_no = "SIM-88889999"
         item_no = "1"
         eval_res = alert_info.get('eval', {})
         
-        if eval_res.get('action_code') == '90':
+        if str(eval_res.get('action_code', '')) == '90':
             st.markdown(f"""
             <div style="background-color:#fff3cd;color:black;padding:20px;border-radius:10px;border: 2px solid #ffeeba;">
                 <h3 style="color:#856404;margin-top:0;">⚠️ {eval_res['status_label']} (Latent Risk / Behavioral Anomaly)</h3>
                 <p><strong>Alert Ref No:</strong> {alert_info['ref_no']}</p>
                 <p><strong>Target:</strong> Declaration Number: {decl_no} / Item Number: {item_no}</p>
                 <p>{action_desc_html}</p>
-                <h4 style="color:#856404;">Instruction: สินค้าราคาผ่านเกณฑ์สถิติ แต่ AI พบพฤติกรรมเสี่ยงด้านประเทศต้นทาง/รูปแบบการขนส่ง ขอเอกสารเพิ่มเติมเพื่อพิจารณาอย่างละเอียด</h4>
+                <h4 style="color:#856404;">Instruction: สินค้าราคาผ่านเกณฑ์สถิติ แต่ AI พบพฤติกรรมเสี่ยงแฝง อนุญาตให้ตรวจปล่อยสินค้า และส่งชุดข้อมูลให้หน่วยงาน PCA (สตร.) เข้าตรวจสอบเชิงลึก</h4>
+            </div>
+            """, unsafe_allow_html=True)
+        elif str(eval_res.get('action_code', '')) == '890':
+            st.markdown(f"""
+            <div style="background-color:#fff3cd;color:black;padding:20px;border-radius:10px;border: 2px solid #ffeeba;">
+                <h3 style="color:#856404;margin-top:0;">⚠️ ไม่สามารถประเมินความเสี่ยงได้ (Insufficient Data)</h3>
+                <p><strong>Target:</strong> Declaration Number: {decl_no} / Item Number: {item_no}</p>
+                <h4 style="color:#856404;">Instruction: {action_desc_html}</h4>
             </div>
             """, unsafe_allow_html=True)
         elif eval_res.get('is_anomaly'):
+            instruction_text = f"ขอเอกสารเพิ่มเติมเพื่อตรวจสอบราคาศุลกากรของสินค้ารายการที่ {item_no}"
+            if str(eval_res.get('action_code', '')) == '88':
+                instruction_text = "อนุญาตให้ตรวจปล่อยสินค้า และส่งข้อมูลให้หน่วยงาน PCA"
+                
+            ref_no_html = f"<p><strong>Alert Ref No:</strong> {alert_info['ref_no']}</p>" if alert_info.get('ref_no') else ""
+                
             st.markdown(f"""
             <div style="background-color:#ffe6e6;color:black;padding:20px;border-radius:10px;border: 2px solid red;">
                 <h3 style="color:red;margin-top:0;">🛑 {eval_res['status_label']} (Price Volatility / Under-valuation detected)</h3>
-                <p><strong>Alert Ref No:</strong> {alert_info['ref_no']}</p>
+                {ref_no_html}
                 <p><strong>Target:</strong> Declaration Number: {decl_no} / Item Number: {item_no}</p>
                 <p>{action_desc_html}</p>
-                <h4 style="color:darkred;">Instruction: ขอเอกสารเพิ่มเติมเพื่อตรวจสอบราคาศุลกากรของสินค้ารายการที่ {item_no}</h4>
+                <h4 style="color:darkred;">Instruction: {instruction_text}</h4>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -495,6 +515,7 @@ with tab3:
                                 port = user_input.get('Port_of_Entry', 'Unknown')
                                 quantity = user_input.get('Quantity', 1.0)
                                 weight = user_input.get('Gross_Weight_KG', 1.0)
+                                related_party = user_input.get('Is_Related_Party', 0)
     
                                 new_row = {
                                     "PRAISE_Alert_Ref_No": ref_input,
@@ -510,7 +531,8 @@ with tab3:
                                     "Product_Year": year,
                                     "Port_of_Entry": port,
                                     "Quantity": quantity,
-                                    "Gross_Weight_KG": weight
+                                    "Gross_Weight_KG": weight,
+                                    "Is_Related_Party": related_party
                                 }
                                 
                                 fb_df = pd.concat([fb_df, pd.DataFrame([new_row])], ignore_index=True)

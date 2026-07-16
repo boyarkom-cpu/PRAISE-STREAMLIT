@@ -26,7 +26,7 @@ def generate_data() -> None:
     dec_counter = itertools.count(10000)
     data = []
     
-    def create_profile_rows(importer_id, desc, hs_code, min_price_foreign, max_price_foreign, n_rows, anomaly_type, duty_rate_fixed, distribution_type='uniform', external_benchmark_price_thb=0.0, origin_weights=None, transport_weights=None):
+    def create_profile_rows(importer_id, desc, hs_code, min_price_foreign, max_price_foreign, n_rows, anomaly_type, duty_rate_fixed, distribution_type='uniform', external_benchmark_price_thb=0.0, origin_weights=None, transport_weights=None, related_party_prob=0.0):
         """Helper function to create structured rows for a specific profile. Base pricing is sampled per-row from a uniform distribution range."""
         if anomaly_type not in ['severe', 'moderate', 'stable']:
             raise ValueError(f"Zero-Silent Bug Policy: Invalid anomaly_type '{anomaly_type}'. Must be 'severe', 'moderate', or 'stable'.")
@@ -157,7 +157,8 @@ def generate_data() -> None:
                 'Duty_Paid_THB': duty_paid,
                 'VAT_Paid_THB': round((invoice_amount_thb + duty_paid) * 0.07, 2),
                 'Other_Taxes_THB': 0.0,
-                'External_Benchmark_Price_THB': external_benchmark_price_thb
+                'External_Benchmark_Price_THB': external_benchmark_price_thb,
+                'Is_Related_Party': int(np.random.choice([1, 0], p=[related_party_prob, 1.0 - related_party_prob]))
             }
             profile_data.append(row)
         return profile_data
@@ -172,23 +173,23 @@ def generate_data() -> None:
     # signals for the Isolation Forest AI instead of uniform random noise.
     profiles = [
         ('IMP-001', 'Cake', '19059030', 100.0, 200.0, 10000, 'stable', 0.30, 'normal', 5000.0,
-         {'JP': 0.70, 'CN': 0.20, 'US': 0.05, 'DE': 0.05}, {'Sea': 0.60, 'Air': 0.30, 'Land': 0.10}),
+         {'JP': 0.70, 'CN': 0.20, 'US': 0.05, 'DE': 0.05}, {'Sea': 0.60, 'Air': 0.30, 'Land': 0.10}, 0.20),
         ('IMP-002', 'Whisky', '22083090', 500.0, 3000.0, 5500, 'moderate', 0.60, 'lognormal', 80000.0,
-         {'US': 0.40, 'JP': 0.40, 'DE': 0.15, 'CN': 0.05}, {'Sea': 0.50, 'Air': 0.40, 'Land': 0.10}),
+         {'US': 0.40, 'JP': 0.40, 'DE': 0.15, 'CN': 0.05}, {'Sea': 0.50, 'Air': 0.40, 'Land': 0.10}, 0.75),
         ('IMP-003', 'Perfumes', '33030000', 3000.0, 3200.0, 20000, 'moderate', 0.30, 'tight_normal', 105400.0,
-         {'DE': 0.50, 'US': 0.30, 'JP': 0.15, 'CN': 0.05}, {'Air': 0.60, 'Sea': 0.30, 'Land': 0.10}),
+         {'DE': 0.50, 'US': 0.30, 'JP': 0.15, 'CN': 0.05}, {'Air': 0.60, 'Sea': 0.30, 'Land': 0.10}, 0.80),
         # Note: IMP-004 is intentionally set to exactly 18 rows (< MIN_SAMPLE_SIZE of 20) 
         # to strictly test the Action Code 890 (Force Alert / Cold Start) functionality. Do not increase this number.
         ('IMP-004', 'Leather Belts', '42033000', 1000.0, 2000.0, 18, 'severe', 0.30, 'left_skewed', 50000.0,
-         {'CN': 0.60, 'JP': 0.20, 'DE': 0.15, 'US': 0.05}, {'Sea': 0.50, 'Air': 0.30, 'Land': 0.20}),
+         {'CN': 0.60, 'JP': 0.20, 'DE': 0.15, 'US': 0.05}, {'Sea': 0.50, 'Air': 0.30, 'Land': 0.20}, 0.30),
         ('IMP-005', 'Women Dresses', '62044290', 1200.0, 1400.0, 25000, 'stable', 0.30, 'step_down', 44200.0,
-         {'CN': 0.80, 'JP': 0.10, 'DE': 0.05, 'US': 0.05}, {'Sea': 0.70, 'Air': 0.20, 'Land': 0.10}),
+         {'CN': 0.80, 'JP': 0.10, 'DE': 0.05, 'US': 0.05}, {'Sea': 0.70, 'Air': 0.20, 'Land': 0.10}, 0.40),
         ('IMP-006', 'Footwear', '64039990', 800.0, 850.0, 22000, 'stable', 0.30, 'normal', 28050.0,
-         {'CN': 0.75, 'JP': 0.10, 'DE': 0.10, 'US': 0.05}, {'Sea': 0.70, 'Air': 0.20, 'Land': 0.10}),
+         {'CN': 0.75, 'JP': 0.10, 'DE': 0.10, 'US': 0.05}, {'Sea': 0.70, 'Air': 0.20, 'Land': 0.10}, 0.50),
         ('IMP-007', 'Passenger Cars', '87032324', 30000.0, 80000.0, 2482, 'moderate', 0.80, 'tight_normal', 2500000.0,
-         {'JP': 0.50, 'DE': 0.40, 'US': 0.08, 'CN': 0.02}, {'Sea': 0.90, 'Land': 0.08, 'Air': 0.02}),
+         {'JP': 0.50, 'DE': 0.40, 'US': 0.08, 'CN': 0.02}, {'Sea': 0.90, 'Land': 0.08, 'Air': 0.02}, 0.90),
         ('IMP-008', 'Clutches', '87089360', 2000.0, 5000.0, 15000, 'stable', 0.30, 'normal', 100000.0,
-         {'CN': 0.50, 'JP': 0.30, 'DE': 0.15, 'US': 0.05}, {'Sea': 0.65, 'Air': 0.25, 'Land': 0.10}),
+         {'CN': 0.50, 'JP': 0.30, 'DE': 0.15, 'US': 0.05}, {'Sea': 0.65, 'Air': 0.25, 'Land': 0.10}, 0.85),
     ]
     expected_total = 100000
     calculated_total = sum(p[5] for p in profiles)

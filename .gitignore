@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+venv/
+env/
+.venv/
+mockup_customs_data.csv
+.streamlit/secrets.toml
+
+# Ignore VS Code settings and JSON files
+.vscode/
+*.json

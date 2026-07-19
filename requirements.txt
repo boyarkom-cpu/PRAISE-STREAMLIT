@@ -6,3 +6,4 @@ qrcode==8.2
 requests==2.32.5
 filelock
 scikit-learn
+streamlit-analytics2

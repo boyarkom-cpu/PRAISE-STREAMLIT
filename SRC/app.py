@@ -131,7 +131,8 @@ def generate_alert_ref() -> str:
     running_no = f"{current_count:03d}"
     return f"{yy}{mmdd}{running_no}"
 
-with streamlit_analytics.track(unsafe_password=st.secrets.get("analytics", {}).get("password", "")):
+_analytics_password = st.secrets.get("analytics", {}).get("password", "") or None
+with streamlit_analytics.track(unsafe_password=_analytics_password):
     # --- 3. Main Dashboard UI & Interactive Input ---
     st.title("ปัญญาประดิษฐ์เพื่อประเมินความเสี่ยงด้านราคาศุลกากรเชิงสถิติ (PRAISE : Pricing Risk AI & Statistical Engine)")
 
